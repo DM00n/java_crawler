@@ -6,7 +6,8 @@ import java.io.IOException;
 import java.util.concurrent.TimeoutException;
 
 public class Main {
-    static String QUEUE_NAME = "crawler_queue";
+    static String LINK_QUEUE = "link_queue";
+    static String PUT_QUEUE = "put_queue";
     public static void main(String[] args) throws InterruptedException, IOException, TimeoutException {
         ConnectionFactory connectionFactory = new ConnectionFactory();
         connectionFactory.setHost("127.0.0.1");
@@ -18,7 +19,8 @@ public class Main {
         Connection connection = connectionFactory.newConnection();
 
         Channel channel = connection.createChannel();
-        channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+        channel.queueDeclare(LINK_QUEUE, false, false, false, null);
+        channel.queueDeclare(PUT_QUEUE, false, false, false, null);
         channel.close();
         connection.close();
 
@@ -31,10 +33,9 @@ public class Main {
                 e.printStackTrace();
             }
         });
-
         Thread t2 = new Thread(() -> {
             try {
-                pc.consume("t2\n");
+                pc.consume();
             }
             catch (InterruptedException | IOException | TimeoutException e) {
                 e.printStackTrace();
@@ -42,9 +43,17 @@ public class Main {
         });
         Thread t3 = new Thread(() -> {
             try {
-                pc.consume("t3\n");
+                pc.consume();
             }
             catch (InterruptedException | IOException | TimeoutException e) {
+                e.printStackTrace();
+            }
+        });
+        Thread t4 = new Thread(() -> {
+            try {
+                pc.put();
+            }
+            catch (IOException | TimeoutException e) {
                 e.printStackTrace();
             }
         });
@@ -52,10 +61,11 @@ public class Main {
         t1.start();
         t2.start();
         t3.start();
+        t4.start();
 
         t1.join();
         t2.join();
         t3.join();
-
+        t4.join();
     }
 }

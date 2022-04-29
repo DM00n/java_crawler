@@ -1,3 +1,5 @@
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
@@ -8,15 +10,19 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
+import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.client.Client;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.transport.TransportAddress;
+import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.transport.client.PreBuiltTransportClient;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeoutException;
 
 public class PC {
@@ -79,30 +85,45 @@ public class PC {
             String href = aElement.attr("href");
             if (href.startsWith("/news")){
                 href = URL + href;
-                channel.basicPublish("", Main.QUEUE_NAME, null, href.getBytes());
+                channel.basicPublish("", Main.LINK_QUEUE, null, href.getBytes());
             }
         }
         channel.close();
         connection.close();
     }
 
-    void consume(String name) throws InterruptedException, IOException, TimeoutException {
+    void consume() throws InterruptedException, IOException, TimeoutException {
         Connection connection = connectionFactory.newConnection();
         Channel channel = connection.createChannel();
-        //while (channel.messageCount(Main.QUEUE_NAME) > 0){
         while (true){
-            if (channel.messageCount(Main.QUEUE_NAME) == 0) continue;
-            String url = new String(channel.basicGet(Main.QUEUE_NAME, true).getBody(), StandardCharsets.UTF_8);
+            if (channel.messageCount(Main.LINK_QUEUE) == 0) continue;
+            String url = new String(channel.basicGet(Main.LINK_QUEUE, true).getBody(), StandardCharsets.UTF_8);
             Document doc = getDoc(url);
             if (doc == null) continue;
-            String URL = "URL: " + url + '\n';
-            String title =  "Title: " + doc.getElementsByClass("topic-body__title").text() + '\n';
-            String text = "Text: " + doc.getElementsByClass("topic-body__content-text").text() + '\n';
-            String time = "Time: " + doc.getElementsByClass("topic-header__time").text() + '\n';
-            String author = "Author: " + doc.getElementsByClass("topic-authors__author").text() + '\n';
-            System.out.println(name+URL+title+text+time+author);
+
+            Report report = new Report(url,
+                    doc.getElementsByClass("topic-body__title").text(),
+                    doc.getElementsByClass("topic-body__content-text").text(),
+                    doc.getElementsByClass("topic-header__time").text(),
+                    doc.getElementsByClass("topic-authors__author").text());
+            ObjectWriter ow = new ObjectMapper().writer().withDefaultPrettyPrinter();
+            String json = ow.writeValueAsString(report);
+            channel.basicPublish("", Main.PUT_QUEUE, null, json.getBytes());
         }
-        //channel.close();
-        //connection.close();
+    }
+
+    void put() throws IOException, TimeoutException {
+        Connection connection = connectionFactory.newConnection();
+        Channel channel = connection.createChannel();
+        while (true){
+            if (channel.messageCount(Main.PUT_QUEUE) == 0) continue;
+            String json = new String(channel.basicGet(Main.PUT_QUEUE, true).getBody(), StandardCharsets.UTF_8);
+            Client client = new PreBuiltTransportClient(
+                    Settings.builder().put("cluster.name","docker-cluster").build())
+                    .addTransportAddress(new TransportAddress(InetAddress.getByName("localhost"), 9300));
+            String sha256hex = org.apache.commons.codec.digest.DigestUtils.sha256Hex(json);
+            IndexResponse response = client.prepareIndex("crawler", "_doc", sha256hex)
+                    .setSource(json, XContentType.JSON).get();
+        }
     }
 }
