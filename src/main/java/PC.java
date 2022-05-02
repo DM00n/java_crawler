@@ -10,11 +10,22 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
-import org.elasticsearch.action.index.IndexResponse;
+
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.xcontent.XContentType;
+
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.MatchQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
+import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.transport.client.PreBuiltTransportClient;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -22,7 +33,9 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
 public class PC {
@@ -122,8 +135,34 @@ public class PC {
                     Settings.builder().put("cluster.name","docker-cluster").build())
                     .addTransportAddress(new TransportAddress(InetAddress.getByName("localhost"), 9300));
             String sha256hex = org.apache.commons.codec.digest.DigestUtils.sha256Hex(json);
-            IndexResponse response = client.prepareIndex("crawler", "_doc", sha256hex)
-                    .setSource(json, XContentType.JSON).get();
+            client.prepareIndex("crawler", "_doc", sha256hex).setSource(json, XContentType.JSON).get();
         }
+    }
+
+    void get() throws UnknownHostException, ExecutionException, InterruptedException {
+        Client client = new PreBuiltTransportClient(
+                Settings.builder().put("cluster.name","docker-cluster").build())
+                .addTransportAddress(new TransportAddress(InetAddress.getByName("localhost"), 9300));
+
+        BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
+        MatchQueryBuilder matchQueryBuilder = QueryBuilders.matchQuery("TEXT", "Владимир Путин");
+        boolQueryBuilder.must(matchQueryBuilder);
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(matchQueryBuilder).size(100);
+        SearchRequest searchRequest = new SearchRequest().indices("crawler").source(searchSourceBuilder);
+        SearchHit[] searchHits = client.search(searchRequest).get().getHits().getHits();
+        for (SearchHit hit : searchHits) {
+            System.out.println(hit.getSourceAsString());
+        }
+
+        TermsAggregationBuilder aggregationBuilder = AggregationBuilders.terms("AUTHOR_count").field("AUTHOR.keyword");
+        SearchSourceBuilder searchSourceBuilder2 = new SearchSourceBuilder().aggregation(aggregationBuilder);
+        SearchRequest searchRequest2 = new SearchRequest().indices("crawler").source(searchSourceBuilder2);
+        SearchResponse searchResponse = client.search(searchRequest2).get();
+        Terms terms = searchResponse.getAggregations().get("AUTHOR_count");
+        for (Terms.Bucket bucket : terms.getBuckets()) {
+            System.out.println("author=" + bucket.getKey()+" count="+bucket.getDocCount());
+        }
+
+        client.close();
     }
 }

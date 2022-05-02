@@ -3,6 +3,7 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
 public class Main {
@@ -58,14 +59,33 @@ public class Main {
             }
         });
 
-        t1.start();
+        Thread t5 = new Thread(() -> {
+            try {
+                pc.get();
+            }
+            catch (IOException | ExecutionException | InterruptedException e) {
+                e.printStackTrace();
+            }
+        });
+
+        /*
+          t1 - Ищет все ссылки в исходной ссылке, кладёт их в первую очередь
+          t2, t3 - Берут из первой очереди ссылки, парсят их и кладут содержимое во вторую очередь
+          t4 - Берёт из второй очереди содержимое новостей и кладёт в Эластик
+          t5 - Запросы
+        */
+
+
+        /*t1.start();
         t2.start();
         t3.start();
         t4.start();
+        t5.start();
 
         t1.join();
         t2.join();
         t3.join();
         t4.join();
+        t5.join();*/
     }
 }
